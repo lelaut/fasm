@@ -85,8 +85,6 @@ func printUsage() {
 func read(filepath string) (string, error) {
 	dat, err := os.ReadFile(filepath)
 	if err != nil {
-		// fmt.Println(err)
-		// os.Exit(1)
 		return "", err
 	}
 	return string(dat[:]), nil
@@ -275,9 +273,18 @@ func hasToInst(tokens []string) (*Instruction, error) {
 	if !isWord(tokens[1]) {
 		return nil, formatError("to", I18N_ERR_TO_INVALID_WORD, tokens[1])
 	}
-	moveIf, err := compileIf(tokens[2:])
-	if err != nil {
-		return nil, err
+
+	var moveIf []interface{} = nil
+	var err error
+	if len(tokens) > 2 {
+		if tokens[2] == "if" {
+			moveIf, err = compileIf(tokens[2:])
+			if err != nil {
+				return nil, err
+			}
+		} else if !isCommentInst(tokens[2:]) {
+			return nil, formatError("to", I18N_ERR_TO_INVALID_WORD, tokens[2:])
+		}
 	}
 	return &Instruction{typ: INST_TO, val: IfInst{target: tokens[1], moveIf: moveIf}}, nil
 }
@@ -507,6 +514,9 @@ func executionError(line int, err error) error {
 
 func executeIf(mem []int64, inst Instruction) (res bool, err error) {
 	moveIf := inst.val.(IfInst).moveIf
+	if moveIf == nil {
+		return true, nil
+	}
 	for i := 0; i < len(moveIf); i += 4 {
 		v1, err := valueFromMem(mem, moveIf[i].(InstValue))
 		if err != nil {
