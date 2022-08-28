@@ -5,6 +5,45 @@ import (
 	"os"
 	"strconv"
 	"strings"
+
+	"golang.org/x/text/language"
+	"golang.org/x/text/message"
+)
+
+var i18n *message.Printer
+
+const (
+	I18N_ERR_PROG_TOO_MANY_PARMS = "too many parameters"
+	I18N_ERR_PROG_NEED_ASM_EXT   = "the file must have an .asm extension"
+
+	I18N_ERR_OP_ONLY_ONE_LEFT_VAL = "must have only one operation left value, but received"
+	I18N_ERR_OP_LEFT_VAL_INVALID  = "invalid operation left value"
+	I18N_ERR_OP_RIGHT_VAL_INVALID = "invalid operation first right value"
+	I18N_ERR_OP_OP_INVALID        = "invalid operation, expecting (+,-,/,*), but received"
+	I18N_ERR_OP_2_VAL_INVALID     = "invalid operation second right valuie"
+	I18N_ERR_OP_NOT_ENDED         = "expecting operation to finish, but received"
+
+	I18N_ERR_TO_INVALID_WORD = "expecting valid word, but received"
+
+	I18N_ERR_IF_EXPECT_IF             = "expecting word 'if', but received"
+	I18N_ERR_IF_EXPECT_COMP_OP        = "expecting logic operator(==, !=, >=, <=, >, <), but received"
+	I18N_ERR_IF_EXPECT_LOGIC_OP       = "expecting comparison(&&, ||), but received"
+	I18N_ERR_IF_EXPECT_VALUE          = "expecting a value, but received"
+	I18N_ERR_IF_EXPECT_END_WITH_VALUE = "expecting ending with a value, mas recbeu"
+
+	I18N_ERR_HALT_NO_PARM = "expecting no parameter, but received"
+
+	I18N_ERR_PRINT_EXPECT_VALUE   = "expecting a value, but received"
+	I18N_ERR_PRINT_ONLY_ONE_PARAM = "expecting only one value as a parameter, but received"
+
+	I18N_COMPILE_ERR_TEMPLATE = "[Compilation error: line %d] %v.\n"
+
+	I18N_COMPILE_ERR_INST_NOT_FOUND  = "instruction not found"
+	I18N_COMPILE_ERR_LABEL_NOT_FOUND = "label not defined"
+
+	I18N_EXEC_ERR_INVALID_MEMORY_ACCESS = "invalid memory access"
+
+	I18N_EXEC_ERR_TEMPLATE = "[Execution error: line %d] %v.\n"
 )
 
 const MEMORY_SIZE = 1024
@@ -188,7 +227,7 @@ func hasOperationInst(tokens []string) (*Instruction, error) {
 	if tokens[1] != "=" {
 		for i, token := range tokens[1:] {
 			if token == "=" {
-				return nil, formatError("op", "deve ter apenas um valor no lado esquerdo da operação, mas recebeu", tokens[:i])
+				return nil, formatError("op", I18N_ERR_OP_ONLY_ONE_LEFT_VAL, tokens[:i])
 			}
 		}
 
@@ -197,26 +236,26 @@ func hasOperationInst(tokens []string) (*Instruction, error) {
 
 	v := hasValue(tokens[0])
 	if v == nil || v.typ == VAL_CONST {
-		return nil, formatError("op", "valor esquerdo da operação inválido", tokens[0])
+		return nil, formatError("op", I18N_ERR_OP_LEFT_VAL_INVALID, tokens[0])
 	}
 
 	v1 := hasValue(tokens[2])
 	if v1 == nil {
-		return nil, formatError("op", "primeiro valor direito da operação inválido", tokens[2])
+		return nil, formatError("op", I18N_ERR_OP_RIGHT_VAL_INVALID, tokens[2])
 	}
 
 	op, exists := isOperator(tokens[3])
 	if !exists {
-		return nil, formatError("op", "operação inválida, esperando(+,-,/,*), mas recebeu", tokens[3])
+		return nil, formatError("op", I18N_ERR_OP_OP_INVALID, tokens[3])
 	}
 
 	v2 := hasValue(tokens[4])
 	if v2 == nil {
-		return nil, formatError("op", "segundo valor direito da operação inválido", tokens[4])
+		return nil, formatError("op", I18N_ERR_OP_2_VAL_INVALID, tokens[4])
 	}
 
 	if !isCommentInst(tokens[5:]) {
-		return nil, formatError("op", "esperando finalizar operação, mas recebeu", tokens[5:])
+		return nil, formatError("op", I18N_ERR_OP_NOT_ENDED, tokens[5:])
 	}
 
 	return &Instruction{typ: INST_OP, val: Operation{v: *v, v1: *v1, v2: *v2, op: op}}, nil
@@ -233,7 +272,7 @@ func hasToInst(tokens []string) (*Instruction, error) {
 		return nil, nil
 	}
 	if !isWord(tokens[1]) {
-		return nil, formatError("to", "esperando uma palavra válida, mas recebeu", tokens[1])
+		return nil, formatError("to", I18N_ERR_TO_INVALID_WORD, tokens[1])
 	}
 	moveIf, err := compileIf(tokens[2:])
 	if err != nil {
@@ -307,14 +346,14 @@ func ifInstOrder(i int) int {
 // compileIf if follow this pattern `if $1 {==, !=, >, <, >=, <=} $2 {&&, ||} ... then $n`
 func compileIf(tokens []string) ([]interface{}, error) {
 	if tokens[0] != "if" {
-		return nil, formatError("if", "esperando a palavra 'if', mas recebeu", tokens[0])
+		return nil, formatError("if", I18N_ERR_IF_EXPECT_IF, tokens[0])
 	}
 
 	var params []interface{}
 	for i, token := range tokens[1:] {
 		if isCommentInst(tokens[i:]) {
 			if ifInstOrder(i-1) != IFO_VAL {
-				return nil, formatError("if", "esperando terminar com um valor, mas recebeu", tokens[i-1])
+				return nil, formatError("if", I18N_ERR_IF_EXPECT_END_WITH_VALUE, tokens[i-1])
 			}
 			break
 		}
@@ -327,7 +366,7 @@ func compileIf(tokens []string) ([]interface{}, error) {
 		case IFO_LOP:
 			p, exists = hasLogicOperator(token)
 			if !exists {
-				err = formatError("if", "esperando um operador lógico(==, !=, >=, <=, >, <), mas recebeu", token)
+				err = formatError("if", I18N_ERR_IF_EXPECT_LOGIC_OP, token)
 			}
 			break
 		case IFO_VAL:
@@ -336,13 +375,13 @@ func compileIf(tokens []string) ([]interface{}, error) {
 				exists = true
 				p = *v
 			} else {
-				err = formatError("if", "esperando um valor, mas recebeu", token)
+				err = formatError("if", I18N_ERR_IF_EXPECT_VALUE, token)
 			}
 			break
 		case IFO_CMP:
 			p, exists = hasComparison(token)
 			if !exists {
-				err = formatError("if", "esperando uma comparação(&&, ||), mas recebeu", token)
+				err = formatError("if", I18N_ERR_IF_EXPECT_COMP_OP, token)
 			}
 		}
 
@@ -353,7 +392,7 @@ func compileIf(tokens []string) ([]interface{}, error) {
 	}
 
 	if ifInstOrder(len(tokens)-2) != IFO_VAL {
-		return nil, formatError("if", "esperando terminar com um valor, mas recebeu: %v", tokens[len(tokens)-1])
+		return nil, formatError("if", I18N_ERR_IF_EXPECT_END_WITH_VALUE, tokens[len(tokens)-1])
 	}
 
 	return params, nil
@@ -364,7 +403,7 @@ func hasHaltInst(tokens []string) (*Instruction, error) {
 		return nil, nil
 	}
 	if !isCommentInst(tokens[1:]) {
-		return nil, formatError("halt", "não recebe nenhum parametro, mas recebeu", tokens[1:])
+		return nil, formatError("halt", I18N_ERR_HALT_NO_PARM, tokens[1:])
 	}
 	return &Instruction{typ: INST_HALT}, nil
 }
@@ -375,10 +414,10 @@ func hasPrintInst(tokens []string) (*Instruction, error) {
 	}
 	v1 := hasValue(tokens[1])
 	if v1 == nil {
-		return nil, formatError("print", "espera um valor, mas recebeu", tokens[1])
+		return nil, formatError("print", I18N_ERR_PRINT_EXPECT_VALUE, tokens[1])
 	}
 	if !isCommentInst(tokens[2:]) {
-		return nil, formatError("print", "recebe apenas um valor como parametro, mas recebeu", tokens[2:])
+		return nil, formatError("print", I18N_ERR_PRINT_ONLY_ONE_PARAM, tokens[2:])
 	}
 
 	return &Instruction{typ: INST_PRINT, val: *v1}, nil
@@ -395,7 +434,7 @@ type Program struct {
 }
 
 func compilationError(line int, err error) {
-	fmt.Printf("[Erro de compilação : linha %d] %v.\n", line, err)
+	fmt.Printf(I18N_COMPILE_ERR_TEMPLATE, line, err)
 	os.Exit(1)
 }
 
@@ -430,7 +469,7 @@ func compile(code string) Program {
 				}
 			}
 			if hasError {
-				compilationError(iline, formatError("?", "instrução não identificada", tokens))
+				compilationError(iline, formatError("?", I18N_COMPILE_ERR_INST_NOT_FOUND, tokens))
 			}
 		}
 	}
@@ -439,7 +478,7 @@ func compile(code string) Program {
 		if inst.typ == INST_TO {
 			k := inst.val.(IfInst).target
 			if _, ok := labels[k]; !ok {
-				compilationError(inst.line, formatError("label", "label não foi definida", k))
+				compilationError(inst.line, formatError("label", I18N_COMPILE_ERR_LABEL_NOT_FOUND, k))
 			}
 		}
 	}
@@ -455,7 +494,7 @@ func valueFromMem(mem []int64, val InstValue) (int64, error) {
 		return mem[val.val], nil
 	case VAL_REF:
 		if mem[val.val] < 0 || mem[val.val] > 1023 {
-			return 0, formatError("[memory]", "acesso de memória inválido", val.val)
+			return 0, formatError("[memory]", I18N_EXEC_ERR_INVALID_MEMORY_ACCESS, val.val)
 		}
 		return mem[mem[val.val]], nil
 	}
@@ -463,7 +502,7 @@ func valueFromMem(mem []int64, val InstValue) (int64, error) {
 }
 
 func executionError(line int, err error) {
-	fmt.Printf("[Erro de execução : linha %d] %v.\n", line, err)
+	fmt.Printf(I18N_EXEC_ERR_TEMPLATE, line, err)
 	os.Exit(1)
 }
 
@@ -602,6 +641,42 @@ func run(filepath string) {
 	execute(compile(read(filepath)))
 }
 
+func init() {
+	message.SetString(language.BrazilianPortuguese, I18N_ERR_PROG_TOO_MANY_PARMS, "Muitos parametros")
+	message.SetString(language.BrazilianPortuguese, I18N_ERR_PROG_NEED_ASM_EXT, "Arquivo deve ter a extensão .asm")
+
+	message.SetString(language.BrazilianPortuguese, I18N_ERR_OP_ONLY_ONE_LEFT_VAL, "deve ter apenas um valor no lado esquerdo da operação, mas recebeu")
+	message.SetString(language.BrazilianPortuguese, I18N_ERR_OP_LEFT_VAL_INVALID, "valor esquerdo da operação inválido")
+	message.SetString(language.BrazilianPortuguese, I18N_ERR_OP_RIGHT_VAL_INVALID, "primeiro valor direito da operação inválido")
+	message.SetString(language.BrazilianPortuguese, I18N_ERR_OP_OP_INVALID, "operação inválida, esperando(+,-,/,*), mas recebeu")
+	message.SetString(language.BrazilianPortuguese, I18N_ERR_OP_2_VAL_INVALID, "segundo valor direito da operação inválido")
+	message.SetString(language.BrazilianPortuguese, I18N_ERR_OP_NOT_ENDED, "esperando finalizar operação, mas recebeu")
+
+	message.SetString(language.BrazilianPortuguese, I18N_ERR_TO_INVALID_WORD, "esperando uma palavra válida, mas recebeu")
+
+	message.SetString(language.BrazilianPortuguese, I18N_ERR_IF_EXPECT_IF, "esperando a palavra 'if', mas recebeu")
+	message.SetString(language.BrazilianPortuguese, I18N_ERR_IF_EXPECT_COMP_OP, "esperando um operador lógico(==, !=, >=, <=, >, <), mas recebeu")
+	message.SetString(language.BrazilianPortuguese, I18N_ERR_IF_EXPECT_LOGIC_OP, "esperando uma comparação(&&, ||), mas recebeu")
+	message.SetString(language.BrazilianPortuguese, I18N_ERR_IF_EXPECT_VALUE, "esperando um valor, mas recebeu")
+	message.SetString(language.BrazilianPortuguese, I18N_ERR_IF_EXPECT_END_WITH_VALUE, "esperando terminar com um valor, mas recebeu")
+
+	message.SetString(language.BrazilianPortuguese, I18N_ERR_HALT_NO_PARM, "não recebe nenhum parametro, mas recebeu")
+
+	message.SetString(language.BrazilianPortuguese, I18N_ERR_PRINT_EXPECT_VALUE, "espera um valor, mas recebeu")
+	message.SetString(language.BrazilianPortuguese, I18N_ERR_PRINT_ONLY_ONE_PARAM, "recebe apenas um valor como parametro, mas recebeu")
+
+	message.SetString(language.BrazilianPortuguese, I18N_COMPILE_ERR_TEMPLATE, "[Erro de compilação : linha %d] %v.\n")
+
+	message.SetString(language.BrazilianPortuguese, I18N_COMPILE_ERR_INST_NOT_FOUND, "instrução não identificada")
+	message.SetString(language.BrazilianPortuguese, I18N_COMPILE_ERR_LABEL_NOT_FOUND, "label não foi definida")
+
+	message.SetString(language.BrazilianPortuguese, I18N_EXEC_ERR_INVALID_MEMORY_ACCESS, "acesso de memória inválido")
+
+	message.SetString(language.BrazilianPortuguese, I18N_EXEC_ERR_TEMPLATE, "[Erro de execução : linha %d] %v.\n")
+
+	i18n = message.NewPrinter(language.BrazilianPortuguese)
+}
+
 func main() {
 	switch getUse() {
 	case USE_HELP:
@@ -609,11 +684,11 @@ func main() {
 		printUsage()
 		break
 	case USE_TOO_MANY_PARAMS:
-		fmt.Println("Muitos parametros")
+		i18n.Println(I18N_ERR_PROG_TOO_MANY_PARMS)
 		os.Exit(1)
 		break
 	case USE_INVALID_FILE:
-		fmt.Println("Arquivo deve ter a extensão .asm")
+		i18n.Println(I18N_ERR_PROG_NEED_ASM_EXT)
 		os.Exit(1)
 		break
 	case USE_RUN:
