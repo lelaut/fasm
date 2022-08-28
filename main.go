@@ -193,7 +193,8 @@ func hasValue(code string) *InstValue {
 }
 
 const (
-	OP_SUB = iota
+	OP_UNI = iota
+	OP_SUB
 	OP_ADD
 	OP_MUL
 	OP_DIV
@@ -241,6 +242,10 @@ func hasOperationInst(tokens []string) (*Instruction, error) {
 	v1 := hasValue(tokens[2])
 	if v1 == nil {
 		return nil, formatError("op", I18N_ERR_OP_RIGHT_VAL_INVALID, tokens[2])
+	}
+
+	if isCommentInst(tokens[3:]) {
+		return &Instruction{typ: INST_OP, val: Operation{v: *v, v1: *v1, op: OP_UNI}}, nil
 	}
 
 	op, exists := isOperator(tokens[3])
@@ -603,6 +608,13 @@ func execute(prog Program) ([]PrintResult, error) {
 				return results, executionError(prog.instructions[pc].line, err)
 			}
 			switch op.op {
+			case OP_UNI:
+				if op.v.typ == VAL_REF {
+					mem[mem[op.v.val]] = v1
+				} else {
+					mem[op.v.val] = v1
+				}
+				break
 			case OP_ADD:
 				if op.v.typ == VAL_REF {
 					mem[mem[op.v.val]] = v1 + v2

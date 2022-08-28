@@ -10,8 +10,8 @@ factorial:
 
 
 main:
-  $0 = 12 + 0
-  $1 = 1 + 0
+  $0 = 12
+  $1 = 1
   to factorial
 
 
