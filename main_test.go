@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"path"
 	"strings"
@@ -17,7 +18,11 @@ func TestExamples(t *testing.T) {
 
 	for _, item := range items {
 		if strings.HasSuffix(item.Name(), ".asm") {
+			fmt.Println("Running", item.Name())
 			res, err := Run(path.Join(EXAMPLE_FILENAME, item.Name()))
+			if err != nil {
+				t.Error(err)
+			}
 			dat, err := os.ReadFile(path.Join(EXAMPLE_FILENAME, item.Name()+".out"))
 			if err != nil {
 				t.Fatal(err)
@@ -26,6 +31,9 @@ func TestExamples(t *testing.T) {
 
 			for io, o := range out {
 				o = strings.TrimSpace(o)
+				if len(res) <= io {
+					t.Errorf("\nExpected: '%v'\nDidn't received anything", o)
+				}
 				if o != res[io].ToString() {
 					t.Errorf("\nExpected: '%v'\nReceived: '%v'", o, res[io].ToString())
 				}
