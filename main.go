@@ -180,7 +180,6 @@ type Operation struct {
 
 // hasOperationInst if follow this pattern `$v = $1 {-, +, *, /} $2`
 func hasOperationInst(tokens []string) *Instruction {
-	// FIXME: aa
 	iv, exists := isVariable(tokens[0])
 	if !exists {
 		return nil
