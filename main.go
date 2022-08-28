@@ -36,14 +36,14 @@ const (
 	I18N_ERR_PRINT_EXPECT_VALUE   = "expecting a value, but received"
 	I18N_ERR_PRINT_ONLY_ONE_PARAM = "expecting only one value as a parameter, but received"
 
-	I18N_COMPILE_ERR_TEMPLATE = "[Compilation error: line %d] %v.\n"
+	I18N_COMPILE_ERR_TEMPLATE = "[Compilation error: line %d] %v."
 
 	I18N_COMPILE_ERR_INST_NOT_FOUND  = "instruction not found"
 	I18N_COMPILE_ERR_LABEL_NOT_FOUND = "label not defined"
 
 	I18N_EXEC_ERR_INVALID_MEMORY_ACCESS = "invalid memory access"
 
-	I18N_EXEC_ERR_TEMPLATE = "[Execution error: line %d] %v.\n"
+	I18N_EXEC_ERR_TEMPLATE = "[Execution error: line %d] %v."
 )
 
 const MEMORY_SIZE = 1024
@@ -82,13 +82,14 @@ func printUsage() {
 	fmt.Println("")
 }
 
-func read(filepath string) string {
+func read(filepath string) (string, error) {
 	dat, err := os.ReadFile(filepath)
 	if err != nil {
-		fmt.Println(err)
-		os.Exit(1)
+		// fmt.Println(err)
+		// os.Exit(1)
+		return "", err
 	}
-	return string(dat[:])
+	return string(dat[:]), nil
 }
 
 func getTokens(c rune) bool {
@@ -433,12 +434,11 @@ type Program struct {
 	instructions []Instruction
 }
 
-func compilationError(line int, err error) {
-	fmt.Printf(I18N_COMPILE_ERR_TEMPLATE, line, err)
-	os.Exit(1)
+func compilationError(line int, err error) error {
+	return fmt.Errorf(I18N_COMPILE_ERR_TEMPLATE, line, err)
 }
 
-func compile(code string) Program {
+func compile(code string) (*Program, error) {
 	var instructions []Instruction
 	var labels map[string]int
 	lines := strings.Split(code, "\n")
@@ -459,7 +459,7 @@ func compile(code string) Program {
 			for _, f := range INSTRUCTIONS {
 				inst, err := f(tokens)
 				if err != nil {
-					compilationError(iline, err)
+					return nil, compilationError(iline, err)
 				}
 				if inst != nil {
 					hasError = false
@@ -469,7 +469,7 @@ func compile(code string) Program {
 				}
 			}
 			if hasError {
-				compilationError(iline, formatError("?", I18N_COMPILE_ERR_INST_NOT_FOUND, tokens))
+				return nil, compilationError(iline, formatError("?", I18N_COMPILE_ERR_INST_NOT_FOUND, tokens))
 			}
 		}
 	}
@@ -478,12 +478,12 @@ func compile(code string) Program {
 		if inst.typ == INST_TO {
 			k := inst.val.(IfInst).target
 			if _, ok := labels[k]; !ok {
-				compilationError(inst.line, formatError("label", I18N_COMPILE_ERR_LABEL_NOT_FOUND, k))
+				return nil, compilationError(inst.line, formatError("label", I18N_COMPILE_ERR_LABEL_NOT_FOUND, k))
 			}
 		}
 	}
 
-	return Program{instructions: instructions, labels: labels}
+	return &Program{instructions: instructions, labels: labels}, nil
 }
 
 func valueFromMem(mem []int64, val InstValue) (int64, error) {
@@ -498,25 +498,24 @@ func valueFromMem(mem []int64, val InstValue) (int64, error) {
 		}
 		return mem[mem[val.val]], nil
 	}
-	return 0, fmt.Errorf("IMPOSSIBLE!")
+	panic("IMPOSSIBLE")
 }
 
-func executionError(line int, err error) {
-	fmt.Printf(I18N_EXEC_ERR_TEMPLATE, line, err)
-	os.Exit(1)
+func executionError(line int, err error) error {
+	return fmt.Errorf(I18N_EXEC_ERR_TEMPLATE, line, err)
 }
 
-func executeIf(mem []int64, inst Instruction) (res bool) {
+func executeIf(mem []int64, inst Instruction) (res bool, err error) {
 	moveIf := inst.val.(IfInst).moveIf
 	for i := 0; i < len(moveIf); i += 4 {
 		v1, err := valueFromMem(mem, moveIf[i].(InstValue))
 		if err != nil {
-			executionError(inst.line, err)
+			return false, executionError(inst.line, err)
 		}
 		cp := moveIf[i+1].(int64)
 		v2, err := valueFromMem(mem, moveIf[i+2].(InstValue))
 		if err != nil {
-			executionError(inst.line, err)
+			return false, executionError(inst.line, err)
 		}
 
 		var r bool
@@ -553,23 +552,43 @@ func executeIf(mem []int64, inst Instruction) (res bool) {
 		}
 	}
 
-	return res
+	return res, nil
 }
 
-func execute(prog Program) {
+type PrintResult struct {
+	val InstValue
+	ref int64
+	res int64
+}
+
+func (p PrintResult) ToString() string {
+	switch p.val.typ {
+	case VAL_CONST:
+		return fmt.Sprintf("$ %d", p.val.val)
+	case VAL_VAR:
+		return fmt.Sprintf("$ [ %d ] %d", p.val.val, p.res)
+	case VAL_REF:
+		return fmt.Sprintf("$ [ %d -> %d ] %d", p.val.val, p.ref, p.res)
+	}
+	panic("IMPOSSIBLE")
+}
+
+func execute(prog Program) ([]PrintResult, error) {
+	var results []PrintResult
 	pc := 0
 	mem := make([]int64, 1024)
+
 	for pc < len(prog.instructions) {
 		switch prog.instructions[pc].typ {
 		case INST_OP:
 			op := prog.instructions[pc].val.(Operation)
 			v1, err := valueFromMem(mem, op.v1)
 			if err != nil {
-				executionError(prog.instructions[pc].line, err)
+				return results, executionError(prog.instructions[pc].line, err)
 			}
 			v2, err := valueFromMem(mem, op.v2)
 			if err != nil {
-				executionError(prog.instructions[pc].line, err)
+				return results, executionError(prog.instructions[pc].line, err)
 			}
 			switch op.op {
 			case OP_ADD:
@@ -604,7 +623,11 @@ func execute(prog Program) {
 			pc += 1
 		case INST_TO:
 			i := prog.instructions[pc].val.(IfInst)
-			if executeIf(mem, prog.instructions[pc]) {
+			c, err := executeIf(mem, prog.instructions[pc])
+			if err != nil {
+				return results, err
+			}
+			if c {
 				pc = prog.labels[i.target]
 			}
 			break
@@ -612,33 +635,48 @@ func execute(prog Program) {
 			val := prog.instructions[pc].val.(InstValue)
 			switch val.typ {
 			case VAL_CONST:
-				fmt.Printf("$ %d\n", val.val)
+				// fmt.Printf("$ %d\n", val.val)
+				results = append(results, PrintResult{val: val})
 				break
 			case VAL_VAR:
 				v, err := valueFromMem(mem, val)
 				if err != nil {
-					executionError(prog.instructions[pc].line, err)
+					return results, executionError(prog.instructions[pc].line, err)
+				} else {
+					results = append(results, PrintResult{val: val, res: v})
 				}
-				fmt.Printf("$ [ %d ] %d\n", val.val, v)
+				// fmt.Printf("$ [ %d ] %d\n", val.val, v)
 				break
 			case VAL_REF:
 				v, err := valueFromMem(mem, val)
 				if err != nil {
-					executionError(prog.instructions[pc].line, err)
+					return results, executionError(prog.instructions[pc].line, err)
+				} else {
+					results = append(results, PrintResult{val: val, ref: mem[val.val], res: v})
 				}
-				fmt.Printf("$ [ %d -> %d ] %d\n", val.val, mem[val.val], v)
+				// fmt.Printf("$ [ %d -> %d ] %d\n", val.val, mem[val.val], v)
 				break
 			}
 			pc += 1
 			break
 		case INST_HALT:
-			return
+			return results, nil
 		}
 	}
+
+	return results, nil
 }
 
-func run(filepath string) {
-	execute(compile(read(filepath)))
+func Run(filepath string) ([]PrintResult, error) {
+	dat, err := read(filepath)
+	if err != nil {
+		return []PrintResult{}, err
+	}
+	prog, err := compile(dat)
+	if err != nil {
+		return []PrintResult{}, err
+	}
+	return execute(*prog)
 }
 
 func init() {
@@ -665,16 +703,20 @@ func init() {
 	message.SetString(language.BrazilianPortuguese, I18N_ERR_PRINT_EXPECT_VALUE, "espera um valor, mas recebeu")
 	message.SetString(language.BrazilianPortuguese, I18N_ERR_PRINT_ONLY_ONE_PARAM, "recebe apenas um valor como parametro, mas recebeu")
 
-	message.SetString(language.BrazilianPortuguese, I18N_COMPILE_ERR_TEMPLATE, "[Erro de compilação : linha %d] %v.\n")
+	message.SetString(language.BrazilianPortuguese, I18N_COMPILE_ERR_TEMPLATE, "[Erro de compilação : linha %d] %v.")
 
 	message.SetString(language.BrazilianPortuguese, I18N_COMPILE_ERR_INST_NOT_FOUND, "instrução não identificada")
 	message.SetString(language.BrazilianPortuguese, I18N_COMPILE_ERR_LABEL_NOT_FOUND, "label não foi definida")
 
 	message.SetString(language.BrazilianPortuguese, I18N_EXEC_ERR_INVALID_MEMORY_ACCESS, "acesso de memória inválido")
 
-	message.SetString(language.BrazilianPortuguese, I18N_EXEC_ERR_TEMPLATE, "[Erro de execução : linha %d] %v.\n")
+	message.SetString(language.BrazilianPortuguese, I18N_EXEC_ERR_TEMPLATE, "[Erro de execução : linha %d] %v.")
 
 	i18n = message.NewPrinter(language.BrazilianPortuguese)
+}
+
+func print(r PrintResult) {
+	fmt.Println(r.ToString())
 }
 
 func main() {
@@ -692,7 +734,14 @@ func main() {
 		os.Exit(1)
 		break
 	case USE_RUN:
-		run(os.Args[1])
+		res, err := Run(os.Args[1])
+		for _, r := range res {
+			print(r)
+		}
+		if err != nil {
+			fmt.Println(err)
+			os.Exit(1)
+		}
 		break
 	}
 }
