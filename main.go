@@ -18,6 +18,10 @@ const (
 	USE_NONE
 )
 
+func formatError(typ string, message string, problem interface{}) error {
+	return fmt.Errorf("<%v> %v: %v", typ, message, problem)
+}
+
 func getUse() int {
 	if len(os.Args) == 1 {
 		return USE_HELP
@@ -60,8 +64,9 @@ const (
 )
 
 type Instruction struct {
-	typ int
-	val interface{}
+	typ  int
+	val  interface{}
+	line int
 }
 
 // isCommentInst if first token starts with '#'
@@ -179,36 +184,42 @@ type Operation struct {
 }
 
 // hasOperationInst if follow this pattern `$v = $1 {-, +, *, /} $2`
-func hasOperationInst(tokens []string) *Instruction {
-	v := hasValue(tokens[0])
-	if v == nil || v.typ != VAL_CONST {
-		return nil
+func hasOperationInst(tokens []string) (*Instruction, error) {
+	if tokens[1] != "=" {
+		for i, token := range tokens[1:] {
+			if token == "=" {
+				return nil, formatError("op", "deve ter apenas um valor no lado esquerdo da operação, mas recebeu", tokens[:i])
+			}
+		}
+
+		return nil, nil
 	}
 
-	if tokens[1] != "=" {
-		return nil
+	v := hasValue(tokens[0])
+	if v == nil || v.typ == VAL_CONST {
+		return nil, formatError("op", "valor esquerdo da operação inválido", tokens[0])
 	}
 
 	v1 := hasValue(tokens[2])
 	if v1 == nil {
-		return nil
+		return nil, formatError("op", "primeiro valor direito da operação inválido", tokens[2])
 	}
 
 	op, exists := isOperator(tokens[3])
 	if !exists {
-		return nil
+		return nil, formatError("op", "operação inválida, esperando(+,-,/,*), mas recebeu", tokens[3])
 	}
 
 	v2 := hasValue(tokens[4])
 	if v2 == nil {
-		return nil
+		return nil, formatError("op", "segundo valor direito da operação inválido", tokens[4])
 	}
 
 	if !isCommentInst(tokens[5:]) {
-		return nil
+		return nil, formatError("op", "esperando finalizar operação, mas recebeu", tokens[5:])
 	}
 
-	return &Instruction{typ: INST_OP, val: Operation{v: *v, v1: *v1, v2: *v2, op: op}}
+	return &Instruction{typ: INST_OP, val: Operation{v: *v, v1: *v1, v2: *v2, op: op}}, nil
 }
 
 type IfInst struct {
@@ -217,18 +228,18 @@ type IfInst struct {
 }
 
 // hasToInst if first token is a 'to' and second is a label
-func hasToInst(tokens []string) *Instruction {
+func hasToInst(tokens []string) (*Instruction, error) {
 	if tokens[0] != "to" {
-		return nil
+		return nil, nil
 	}
 	if !isWord(tokens[1]) {
-		return nil
+		return nil, formatError("to", "esperando uma palavra válida, mas recebeu", tokens[1])
 	}
-	moveIf := compileIf(tokens[2:])
-	if moveIf == nil {
-		return nil
+	moveIf, err := compileIf(tokens[2:])
+	if err != nil {
+		return nil, err
 	}
-	return &Instruction{typ: INST_TO, val: IfInst{target: tokens[1], moveIf: *moveIf}}
+	return &Instruction{typ: INST_TO, val: IfInst{target: tokens[1], moveIf: moveIf}}, nil
 }
 
 const (
@@ -294,95 +305,106 @@ func ifInstOrder(i int) int {
 }
 
 // compileIf if follow this pattern `if $1 {==, !=, >, <, >=, <=} $2 {&&, ||} ... then $n`
-func compileIf(tokens []string) *[]interface{} {
+func compileIf(tokens []string) ([]interface{}, error) {
 	if tokens[0] != "if" {
-		return nil
+		return nil, formatError("if", "esperando a palavra 'if', mas recebeu", tokens[0])
 	}
 
 	var params []interface{}
 	for i, token := range tokens[1:] {
 		if isCommentInst(tokens[i:]) {
 			if ifInstOrder(i-1) != IFO_VAL {
-				return nil
+				return nil, formatError("if", "esperando terminar com um valor, mas recebeu", tokens[i-1])
 			}
 			break
 		}
 
 		var p interface{}
-		exists := false
+		var exists bool
+		var err error
 
 		switch ifInstOrder(i) {
 		case IFO_LOP:
 			p, exists = hasLogicOperator(token)
+			if !exists {
+				err = formatError("if", "esperando um operador lógico(==, !=, >=, <=, >, <), mas recebeu", token)
+			}
 			break
 		case IFO_VAL:
 			v := hasValue(token)
-			if p != nil {
+			if v != nil {
 				exists = true
 				p = *v
+			} else {
+				err = formatError("if", "esperando um valor, mas recebeu", token)
 			}
 			break
 		case IFO_CMP:
 			p, exists = hasComparison(token)
+			if !exists {
+				err = formatError("if", "esperando uma comparação(&&, ||), mas recebeu", token)
+			}
 		}
 
-		if !exists {
-			return nil
+		if err != nil {
+			return nil, err
 		}
 		params = append(params, p)
 	}
 
 	if ifInstOrder(len(tokens)-2) != IFO_VAL {
-		return nil
+		return nil, formatError("if", "esperando terminar com um valor, mas recebeu: %v", tokens[len(tokens)-1])
 	}
 
-	return &params
+	return params, nil
 }
 
-func hasHaltInst(tokens []string) *Instruction {
+func hasHaltInst(tokens []string) (*Instruction, error) {
 	if tokens[0] != "halt" {
-		return nil
+		return nil, nil
 	}
 	if !isCommentInst(tokens[1:]) {
-		return nil
+		return nil, formatError("halt", "não recebe nenhum parametro, mas recebeu", tokens[1:])
 	}
-	return &Instruction{typ: INST_HALT}
+	return &Instruction{typ: INST_HALT}, nil
 }
 
-func hasPrintInst(tokens []string) *Instruction {
+func hasPrintInst(tokens []string) (*Instruction, error) {
 	if tokens[0] != "print" {
-		return nil
+		return nil, nil
 	}
 	v1 := hasValue(tokens[1])
 	if v1 == nil {
-		return nil
+		return nil, formatError("print", "espera um valor, mas recebeu", tokens[1])
+	}
+	if !isCommentInst(tokens[2:]) {
+		return nil, formatError("print", "recebe apenas um valor como parametro, mas recebeu", tokens[2:])
 	}
 
-	return &Instruction{typ: INST_PRINT, val: *v1}
+	return &Instruction{typ: INST_PRINT, val: *v1}, nil
 }
 
-type InstFunc func(tokens []string) *Instruction
+type InstFunc func(tokens []string) (*Instruction, error)
 
-var INSTRUCTIONS = []InstFunc{hasOperationInst, hasToInst, hasHaltInst, hasPrintInst}
+// WARN: the order here matters, check the first error for `hasOperationInst` and `hasToInst` to understand why.
+var INSTRUCTIONS = []InstFunc{hasToInst, hasHaltInst, hasPrintInst, hasOperationInst}
 
 type Program struct {
 	labels       map[string]int
 	instructions []Instruction
 }
 
-func compilationError(line int, msg string) {
-	fmt.Printf("[Erro de compilação : linha %d] %s.", line, msg)
+func compilationError(line int, err error) {
+	fmt.Printf("[Erro de compilação : linha %d] %v.\n", line, err)
 	os.Exit(1)
 }
 
-// TODO: add better error message?
-// TODO: add error line
 func compile(code string) Program {
 	var instructions []Instruction
 	var labels map[string]int
 	lines := strings.Split(code, "\n")
 
-	for _, line := range lines {
+	for iline, line := range lines {
 		line = strings.TrimSpace(line)
 		if len(line) == 0 {
 			continue
@@ -396,15 +418,19 @@ func compile(code string) Program {
 		} else {
 			hasError := true
 			for _, f := range INSTRUCTIONS {
-				inst := f(tokens)
+				inst, err := f(tokens)
+				if err != nil {
+					compilationError(iline, err)
+				}
 				if inst != nil {
 					hasError = false
+					inst.line = iline + 1
 					instructions = append(instructions, *inst)
 					break
 				}
 			}
 			if hasError {
-				compilationError(-1, "não foi possivel compilar essa instrução")
+				compilationError(iline, formatError("?", "instrução não identificada", tokens))
 			}
 		}
 	}
@@ -413,7 +439,7 @@ func compile(code string) Program {
 		if inst.typ == INST_TO {
 			k := inst.val.(IfInst).target
 			if _, ok := labels[k]; !ok {
-				compilationError(-1, fmt.Sprintf("a label '%v' não foi definida", k))
+				compilationError(inst.line, formatError("label", "label não foi definida", k))
 			}
 		}
 	}
@@ -421,32 +447,38 @@ func compile(code string) Program {
 	return Program{instructions: instructions, labels: labels}
 }
 
-func valueFromMem(mem []int64, val InstValue) int64 {
+func valueFromMem(mem []int64, val InstValue) (int64, error) {
 	switch val.typ {
 	case VAL_CONST:
-		return val.val
+		return val.val, nil
 	case VAL_VAR:
-		return mem[val.val]
+		return mem[val.val], nil
 	case VAL_REF:
 		if mem[val.val] < 0 || mem[val.val] > 1023 {
-			executionError(-1, fmt.Sprintf("acesso de memória inválida: %d", val.val))
+			return 0, formatError("[memory]", "acesso de memória inválido", val.val)
 		}
-		return mem[mem[val.val]]
+		return mem[mem[val.val]], nil
 	}
-	// WARN: Must never reach this!!!
-	return 0
+	return 0, fmt.Errorf("IMPOSSIBLE!")
 }
 
-func executionError(line int, msg string) {
-	fmt.Printf("[Erro de execução : linha %d] %s.", line, msg)
+func executionError(line int, err error) {
+	fmt.Printf("[Erro de execução : linha %d] %v.\n", line, err)
 	os.Exit(1)
 }
 
-func executeIf(mem []int64, inst IfInst) (res bool) {
-	for i := 0; i < len(inst.moveIf); i += 4 {
-		v1 := valueFromMem(mem, inst.moveIf[i].(InstValue))
-		cp := inst.moveIf[i+1].(int64)
-		v2 := valueFromMem(mem, inst.moveIf[i+2].(InstValue))
+func executeIf(mem []int64, inst Instruction) (res bool) {
+	moveIf := inst.val.(IfInst).moveIf
+	for i := 0; i < len(moveIf); i += 4 {
+		v1, err := valueFromMem(mem, moveIf[i].(InstValue))
+		if err != nil {
+			executionError(inst.line, err)
+		}
+		cp := moveIf[i+1].(int64)
+		v2, err := valueFromMem(mem, moveIf[i+2].(InstValue))
+		if err != nil {
+			executionError(inst.line, err)
+		}
 
 		var r bool
 		switch cp {
@@ -471,7 +503,7 @@ func executeIf(mem []int64, inst IfInst) (res bool) {
 		}
 
 		if i > 0 {
-			switch inst.moveIf[i-1].(int64) {
+			switch moveIf[i-1].(int64) {
 			case LOP_AND:
 				res = res && r
 				break
@@ -492,8 +524,14 @@ func execute(prog Program) {
 		switch prog.instructions[pc].typ {
 		case INST_OP:
 			op := prog.instructions[pc].val.(Operation)
-			v1 := valueFromMem(mem, op.v1)
-			v2 := valueFromMem(mem, op.v2)
+			v1, err := valueFromMem(mem, op.v1)
+			if err != nil {
+				executionError(prog.instructions[pc].line, err)
+			}
+			v2, err := valueFromMem(mem, op.v2)
+			if err != nil {
+				executionError(prog.instructions[pc].line, err)
+			}
 			switch op.op {
 			case OP_ADD:
 				if op.v.typ == VAL_REF {
@@ -527,7 +565,7 @@ func execute(prog Program) {
 			pc += 1
 		case INST_TO:
 			i := prog.instructions[pc].val.(IfInst)
-			if executeIf(mem, i) {
+			if executeIf(mem, prog.instructions[pc]) {
 				pc = prog.labels[i.target]
 			}
 			break
@@ -538,10 +576,18 @@ func execute(prog Program) {
 				fmt.Printf("$ %d\n", val.val)
 				break
 			case VAL_VAR:
-				fmt.Printf("$ [ %d ] %d\n", val.val, valueFromMem(mem, val))
+				v, err := valueFromMem(mem, val)
+				if err != nil {
+					executionError(prog.instructions[pc].line, err)
+				}
+				fmt.Printf("$ [ %d ] %d\n", val.val, v)
 				break
 			case VAL_REF:
-				fmt.Printf("$ [ %d -> %d ] %d\n", val.val, mem[val.val], valueFromMem(mem, val))
+				v, err := valueFromMem(mem, val)
+				if err != nil {
+					executionError(prog.instructions[pc].line, err)
+				}
+				fmt.Printf("$ [ %d -> %d ] %d\n", val.val, mem[val.val], v)
 				break
 			}
 			pc += 1
