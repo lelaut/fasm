@@ -118,7 +118,7 @@ func isCommentInst(tokens []string) bool {
 func isWord(code string) bool {
 	for i, r := range code {
 		isNumber := int(r) >= int('0') && int(r) <= int('9')
-		hasValidChars := int(r) == int('_') && int(r) >= int('a') && int(r) <= int('z')
+		hasValidChars := int(r) == int('_') || int(r) >= int('a') && int(r) <= int('z')
 
 		if i == 0 && isNumber {
 			return false
@@ -208,9 +208,9 @@ func isOperator(code string) (int, bool) {
 	case "+":
 		return OP_ADD, true
 	case "*":
-		return OP_ADD, true
+		return OP_MUL, true
 	case "/":
-		return OP_ADD, true
+		return OP_DIV, true
 	default:
 		return -1, false
 	}
@@ -440,7 +440,7 @@ func compilationError(line int, err error) error {
 
 func compile(code string) (*Program, error) {
 	var instructions []Instruction
-	var labels map[string]int
+	labels := make(map[string]int)
 	lines := strings.Split(code, "\n")
 
 	for iline, line := range lines {
@@ -549,6 +549,8 @@ func executeIf(mem []int64, inst Instruction) (res bool, err error) {
 				res = res || r
 				break
 			}
+		} else {
+			res = r
 		}
 	}
 
@@ -629,13 +631,14 @@ func execute(prog Program) ([]PrintResult, error) {
 			}
 			if c {
 				pc = prog.labels[i.target]
+			} else {
+				pc += 1
 			}
 			break
 		case INST_PRINT:
 			val := prog.instructions[pc].val.(InstValue)
 			switch val.typ {
 			case VAL_CONST:
-				// fmt.Printf("$ %d\n", val.val)
 				results = append(results, PrintResult{val: val})
 				break
 			case VAL_VAR:
@@ -645,7 +648,6 @@ func execute(prog Program) ([]PrintResult, error) {
 				} else {
 					results = append(results, PrintResult{val: val, res: v})
 				}
-				// fmt.Printf("$ [ %d ] %d\n", val.val, v)
 				break
 			case VAL_REF:
 				v, err := valueFromMem(mem, val)
@@ -654,7 +656,6 @@ func execute(prog Program) ([]PrintResult, error) {
 				} else {
 					results = append(results, PrintResult{val: val, ref: mem[val.val], res: v})
 				}
-				// fmt.Printf("$ [ %d -> %d ] %d\n", val.val, mem[val.val], v)
 				break
 			}
 			pc += 1
