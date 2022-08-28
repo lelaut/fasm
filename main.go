@@ -172,7 +172,7 @@ func isOperator(code string) (int, bool) {
 }
 
 type Operation struct {
-	iv int
+	v  InstValue
 	v1 InstValue
 	v2 InstValue
 	op int
@@ -180,8 +180,8 @@ type Operation struct {
 
 // hasOperationInst if follow this pattern `$v = $1 {-, +, *, /} $2`
 func hasOperationInst(tokens []string) *Instruction {
-	iv, exists := isVariable(tokens[0])
-	if !exists {
+	v := hasValue(tokens[0])
+	if v == nil || v.typ != VAL_CONST {
 		return nil
 	}
 
@@ -208,7 +208,7 @@ func hasOperationInst(tokens []string) *Instruction {
 		return nil
 	}
 
-	return &Instruction{typ: INST_OP, val: Operation{iv: iv, v1: *v1, v2: *v2, op: op}}
+	return &Instruction{typ: INST_OP, val: Operation{v: *v, v1: *v1, v2: *v2, op: op}}
 }
 
 type IfInst struct {
@@ -496,16 +496,32 @@ func execute(prog Program) {
 			v2 := valueFromMem(mem, op.v2)
 			switch op.op {
 			case OP_ADD:
-				mem[op.iv] = v1 + v2
+				if op.v.typ == VAL_REF {
+					mem[mem[op.v.val]] = v1 + v2
+				} else {
+					mem[op.v.val] = v1 + v2
+				}
 				break
 			case OP_SUB:
-				mem[op.iv] = v1 - v2
+				if op.v.typ == VAL_REF {
+					mem[mem[op.v.val]] = v1 - v2
+				} else {
+					mem[op.v.val] = v1 - v2
+				}
 				break
 			case OP_MUL:
-				mem[op.iv] = v1 * v2
+				if op.v.typ == VAL_REF {
+					mem[mem[op.v.val]] = v1 * v2
+				} else {
+					mem[op.v.val] = v1 * v2
+				}
 				break
 			case OP_DIV:
-				mem[op.iv] = v1 / v2
+				if op.v.typ == VAL_REF {
+					mem[mem[op.v.val]] = v1 / v2
+				} else {
+					mem[op.v.val] = v1 / v2
+				}
 				break
 			}
 			pc += 1
