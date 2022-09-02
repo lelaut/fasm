@@ -10,7 +10,6 @@ import (
 	"golang.org/x/text/message"
 )
 
-// TODO: remove `halt` instruction
 // TODO: add `read` instruction
 var i18n *message.Printer
 
@@ -32,8 +31,6 @@ const (
 	I18N_ERR_IF_EXPECT_LOGIC_OP       = "expecting comparison(&&, ||), but received"
 	I18N_ERR_IF_EXPECT_VALUE          = "expecting a value, but received"
 	I18N_ERR_IF_EXPECT_END_WITH_VALUE = "expecting ending with a value, mas recbeu"
-
-	I18N_ERR_HALT_NO_PARM = "expecting no parameter, but received"
 
 	I18N_ERR_WRITE_EXPECT_VALUE   = "expecting a value, but received"
 	I18N_ERR_WRITE_ONLY_ONE_PARAM = "expecting only one value as a parameter, but received"
@@ -99,7 +96,6 @@ func getTokens(c rune) bool {
 const (
 	INST_OP = iota
 	INST_TO
-	INST_HALT
 	INST_WRITE
 )
 
@@ -413,16 +409,6 @@ func compileIf(tokens []string) ([]interface{}, error) {
 	return params, nil
 }
 
-func hasHaltInst(tokens []string) (*Instruction, error) {
-	if tokens[0] != "halt" {
-		return nil, nil
-	}
-	if !isCommentInst(tokens[1:]) {
-		return nil, formatError("halt", I18N_ERR_HALT_NO_PARM, tokens[1:])
-	}
-	return &Instruction{typ: INST_HALT}, nil
-}
-
 func hasWriteInst(tokens []string) (*Instruction, error) {
 	if tokens[0] != "write" {
 		return nil, nil
@@ -441,7 +427,7 @@ func hasWriteInst(tokens []string) (*Instruction, error) {
 type InstFunc func(tokens []string) (*Instruction, error)
 
 // WARN: the order here matters, check the first error for `hasOperationInst` and `hasToInst` to understand why.
-var INSTRUCTIONS = []InstFunc{hasToInst, hasHaltInst, hasWriteInst, hasOperationInst}
+var INSTRUCTIONS = []InstFunc{hasToInst, hasWriteInst, hasOperationInst}
 
 type Program struct {
 	labels       map[string]int
@@ -684,8 +670,6 @@ func execute(prog Program) ([]WriteResult, error) {
 			}
 			pc += 1
 			break
-		case INST_HALT:
-			return results, nil
 		}
 	}
 
@@ -722,8 +706,6 @@ func init() {
 	message.SetString(language.BrazilianPortuguese, I18N_ERR_IF_EXPECT_LOGIC_OP, "esperando uma comparação(&&, ||), mas recebeu")
 	message.SetString(language.BrazilianPortuguese, I18N_ERR_IF_EXPECT_VALUE, "esperando um valor, mas recebeu")
 	message.SetString(language.BrazilianPortuguese, I18N_ERR_IF_EXPECT_END_WITH_VALUE, "esperando terminar com um valor, mas recebeu")
-
-	message.SetString(language.BrazilianPortuguese, I18N_ERR_HALT_NO_PARM, "não recebe nenhum parametro, mas recebeu")
 
 	message.SetString(language.BrazilianPortuguese, I18N_ERR_WRITE_EXPECT_VALUE, "espera um valor, mas recebeu")
 	message.SetString(language.BrazilianPortuguese, I18N_ERR_WRITE_ONLY_ONE_PARAM, "recebe apenas um valor como parametro, mas recebeu")
