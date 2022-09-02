@@ -10,6 +10,8 @@ import (
 	"golang.org/x/text/message"
 )
 
+// TODO: remove `halt` instruction
+// TODO: add `read` instruction
 var i18n *message.Printer
 
 const (
@@ -33,8 +35,8 @@ const (
 
 	I18N_ERR_HALT_NO_PARM = "expecting no parameter, but received"
 
-	I18N_ERR_PRINT_EXPECT_VALUE   = "expecting a value, but received"
-	I18N_ERR_PRINT_ONLY_ONE_PARAM = "expecting only one value as a parameter, but received"
+	I18N_ERR_WRITE_EXPECT_VALUE   = "expecting a value, but received"
+	I18N_ERR_WRITE_ONLY_ONE_PARAM = "expecting only one value as a parameter, but received"
 
 	I18N_COMPILE_ERR_TEMPLATE = "[Compilation error: line %d] %v."
 
@@ -98,7 +100,7 @@ const (
 	INST_OP = iota
 	INST_TO
 	INST_HALT
-	INST_PRINT
+	INST_WRITE
 )
 
 type Instruction struct {
@@ -421,25 +423,25 @@ func hasHaltInst(tokens []string) (*Instruction, error) {
 	return &Instruction{typ: INST_HALT}, nil
 }
 
-func hasPrintInst(tokens []string) (*Instruction, error) {
-	if tokens[0] != "print" {
+func hasWriteInst(tokens []string) (*Instruction, error) {
+	if tokens[0] != "write" {
 		return nil, nil
 	}
 	v1 := hasValue(tokens[1])
 	if v1 == nil {
-		return nil, formatError("print", I18N_ERR_PRINT_EXPECT_VALUE, tokens[1])
+		return nil, formatError("write", I18N_ERR_WRITE_EXPECT_VALUE, tokens[1])
 	}
 	if !isCommentInst(tokens[2:]) {
-		return nil, formatError("print", I18N_ERR_PRINT_ONLY_ONE_PARAM, tokens[2:])
+		return nil, formatError("write", I18N_ERR_WRITE_ONLY_ONE_PARAM, tokens[2:])
 	}
 
-	return &Instruction{typ: INST_PRINT, val: *v1}, nil
+	return &Instruction{typ: INST_WRITE, val: *v1}, nil
 }
 
 type InstFunc func(tokens []string) (*Instruction, error)
 
 // WARN: the order here matters, check the first error for `hasOperationInst` and `hasToInst` to understand why.
-var INSTRUCTIONS = []InstFunc{hasToInst, hasHaltInst, hasPrintInst, hasOperationInst}
+var INSTRUCTIONS = []InstFunc{hasToInst, hasHaltInst, hasWriteInst, hasOperationInst}
 
 type Program struct {
 	labels       map[string]int
@@ -572,26 +574,26 @@ func executeIf(mem []int64, inst Instruction) (res bool, err error) {
 	return res, nil
 }
 
-type PrintResult struct {
+type WriteResult struct {
 	val InstValue
 	ref int64
 	res int64
 }
 
-func (p PrintResult) ToString() string {
-	switch p.val.typ {
+func (w WriteResult) ToString() string {
+	switch w.val.typ {
 	case VAL_CONST:
-		return fmt.Sprintf("$ %d", p.val.val)
+		return fmt.Sprintf("$ %d", w.val.val)
 	case VAL_VAR:
-		return fmt.Sprintf("$ [ %d ] %d", p.val.val, p.res)
+		return fmt.Sprintf("$ [ %d ] %d", w.val.val, w.res)
 	case VAL_REF:
-		return fmt.Sprintf("$ [ %d -> %d ] %d", p.val.val, p.ref, p.res)
+		return fmt.Sprintf("$ [ %d -> %d ] %d", w.val.val, w.ref, w.res)
 	}
 	panic("IMPOSSIBLE")
 }
 
-func execute(prog Program) ([]PrintResult, error) {
-	var results []PrintResult
+func execute(prog Program) ([]WriteResult, error) {
+	var results []WriteResult
 	pc := 0
 	mem := make([]int64, 1024)
 
@@ -657,18 +659,18 @@ func execute(prog Program) ([]PrintResult, error) {
 				pc += 1
 			}
 			break
-		case INST_PRINT:
+		case INST_WRITE:
 			val := prog.instructions[pc].val.(InstValue)
 			switch val.typ {
 			case VAL_CONST:
-				results = append(results, PrintResult{val: val})
+				results = append(results, WriteResult{val: val})
 				break
 			case VAL_VAR:
 				v, err := valueFromMem(mem, val)
 				if err != nil {
 					return results, executionError(prog.instructions[pc].line, err)
 				} else {
-					results = append(results, PrintResult{val: val, res: v})
+					results = append(results, WriteResult{val: val, res: v})
 				}
 				break
 			case VAL_REF:
@@ -676,7 +678,7 @@ func execute(prog Program) ([]PrintResult, error) {
 				if err != nil {
 					return results, executionError(prog.instructions[pc].line, err)
 				} else {
-					results = append(results, PrintResult{val: val, ref: mem[val.val], res: v})
+					results = append(results, WriteResult{val: val, ref: mem[val.val], res: v})
 				}
 				break
 			}
@@ -690,14 +692,14 @@ func execute(prog Program) ([]PrintResult, error) {
 	return results, nil
 }
 
-func Run(filepath string) ([]PrintResult, error) {
+func Run(filepath string) ([]WriteResult, error) {
 	dat, err := read(filepath)
 	if err != nil {
-		return []PrintResult{}, err
+		return []WriteResult{}, err
 	}
 	prog, err := compile(dat)
 	if err != nil {
-		return []PrintResult{}, err
+		return []WriteResult{}, err
 	}
 	return execute(*prog)
 }
@@ -723,8 +725,8 @@ func init() {
 
 	message.SetString(language.BrazilianPortuguese, I18N_ERR_HALT_NO_PARM, "não recebe nenhum parametro, mas recebeu")
 
-	message.SetString(language.BrazilianPortuguese, I18N_ERR_PRINT_EXPECT_VALUE, "espera um valor, mas recebeu")
-	message.SetString(language.BrazilianPortuguese, I18N_ERR_PRINT_ONLY_ONE_PARAM, "recebe apenas um valor como parametro, mas recebeu")
+	message.SetString(language.BrazilianPortuguese, I18N_ERR_WRITE_EXPECT_VALUE, "espera um valor, mas recebeu")
+	message.SetString(language.BrazilianPortuguese, I18N_ERR_WRITE_ONLY_ONE_PARAM, "recebe apenas um valor como parametro, mas recebeu")
 
 	message.SetString(language.BrazilianPortuguese, I18N_COMPILE_ERR_TEMPLATE, "[Erro de compilação : linha %d] %v.")
 
@@ -738,7 +740,7 @@ func init() {
 	i18n = message.NewPrinter(language.BrazilianPortuguese)
 }
 
-func print(r PrintResult) {
+func print(r WriteResult) {
 	fmt.Println(r.ToString())
 }
 
