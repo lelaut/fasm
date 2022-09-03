@@ -1,6 +1,6 @@
 $0 = $0 + 1
 $1 = $1 + 100
-print $0
-print $1
-print 12
-print &0
+write $0
+write $1
+write 12
+write &0

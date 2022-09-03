@@ -22,4 +22,4 @@ main:
 
 
 end:
-  print $1
+  write $1
