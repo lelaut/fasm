@@ -10,7 +10,6 @@ import (
 	"golang.org/x/text/message"
 )
 
-// TODO: add `read` instruction
 var i18n *message.Printer
 
 const (
@@ -35,6 +34,9 @@ const (
 	I18N_ERR_WRITE_EXPECT_VALUE   = "expecting a value, but received"
 	I18N_ERR_WRITE_ONLY_ONE_PARAM = "expecting only one value as a parameter, but received"
 
+	I18N_ERR_READ_EXPECT_VALUE = "expecting a value, but received"
+	I18N_ERR_READ_INVALID_WORD = "expecting valid word, but received"
+
 	I18N_COMPILE_ERR_TEMPLATE = "[Compilation error: line %d] %v."
 
 	I18N_COMPILE_ERR_INST_NOT_FOUND  = "instruction not found"
@@ -43,6 +45,8 @@ const (
 	I18N_EXEC_ERR_INVALID_MEMORY_ACCESS = "invalid memory access"
 
 	I18N_EXEC_ERR_TEMPLATE = "[Execution error: line %d] %v."
+
+	I18N_INPUT_ERR_TEMPLATE = "On file '%s' line %d was not possible to convert '%s' into a number\n"
 )
 
 const MEMORY_SIZE = 1024
@@ -97,6 +101,7 @@ const (
 	INST_OP = iota
 	INST_TO
 	INST_WRITE
+	INST_READ
 )
 
 type Instruction struct {
@@ -112,6 +117,9 @@ func isCommentInst(tokens []string) bool {
 
 // isWord if is a valid text that can be used as a Symbol in the compiler
 func isWord(code string) bool {
+	if len(code) <= 1 {
+		return false
+	}
 	for i, r := range code {
 		isNumber := int(r) >= int('0') && int(r) <= int('9')
 		hasValidChars := int(r) == int('_') || int(r) >= int('a') && int(r) <= int('z')
@@ -424,10 +432,36 @@ func hasWriteInst(tokens []string) (*Instruction, error) {
 	return &Instruction{typ: INST_WRITE, val: *v1}, nil
 }
 
+type ReadInst struct {
+	target    InstValue
+	elseLabel string
+}
+
+// hasReadInst will follow the pattern `read $ label?`
+func hasReadInst(tokens []string) (*Instruction, error) {
+	if tokens[0] != "read" {
+		return nil, nil
+	}
+
+	t := hasValue(tokens[1])
+	if t == nil {
+		return nil, formatError("read", I18N_ERR_READ_EXPECT_VALUE, tokens[1])
+	}
+	label := ""
+	if len(tokens) > 2 {
+		if !isWord(tokens[2]) {
+			return nil, formatError("to", I18N_ERR_READ_INVALID_WORD, tokens[1])
+		}
+		label = tokens[2]
+	}
+
+	return &Instruction{typ: INST_READ, val: ReadInst{target: *t, elseLabel: label}}, nil
+}
+
 type InstFunc func(tokens []string) (*Instruction, error)
 
 // WARN: the order here matters, check the first error for `hasOperationInst` and `hasToInst` to understand why.
-var INSTRUCTIONS = []InstFunc{hasToInst, hasWriteInst, hasOperationInst}
+var INSTRUCTIONS = []InstFunc{hasToInst, hasWriteInst, hasOperationInst, hasReadInst}
 
 type Program struct {
 	labels       map[string]int
@@ -479,6 +513,13 @@ func compile(code string) (*Program, error) {
 			k := inst.val.(IfInst).target
 			if _, ok := labels[k]; !ok {
 				return nil, compilationError(inst.line, formatError("label", I18N_COMPILE_ERR_LABEL_NOT_FOUND, k))
+			}
+		} else if inst.typ == INST_READ {
+			k := inst.val.(ReadInst).elseLabel
+			if k != "" {
+				if _, ok := labels[k]; !ok {
+					return nil, compilationError(inst.line, formatError("label", I18N_COMPILE_ERR_LABEL_NOT_FOUND, k))
+				}
 			}
 		}
 	}
@@ -578,9 +619,10 @@ func (w WriteResult) ToString() string {
 	panic("IMPOSSIBLE")
 }
 
-func execute(prog Program) ([]WriteResult, error) {
+func execute(prog Program, input []int64) ([]WriteResult, error) {
 	var results []WriteResult
 	pc := 0
+	rc := 0
 	mem := make([]int64, 1024)
 
 	for pc < len(prog.instructions) {
@@ -670,22 +712,54 @@ func execute(prog Program) ([]WriteResult, error) {
 			}
 			pc += 1
 			break
+		case INST_READ:
+			in := prog.instructions[pc].val.(ReadInst)
+			if rc < len(input) {
+				if in.target.typ == VAL_REF {
+					mem[mem[in.target.val]] = input[rc]
+				} else {
+					mem[in.target.val] = input[rc]
+				}
+				rc += 1
+				pc += 1
+			} else {
+				pc = prog.labels[in.elseLabel]
+			}
+			break
 		}
 	}
 
 	return results, nil
 }
 
-func Run(filepath string) ([]WriteResult, error) {
-	dat, err := read(filepath)
+func Run(source string, input string) ([]WriteResult, error) {
+	sdat, err := read(source)
 	if err != nil {
 		return []WriteResult{}, err
 	}
-	prog, err := compile(dat)
+
+	var ivalues []int64
+	if input != "" {
+		idat, err := read(input)
+		if err != nil {
+			return []WriteResult{}, err
+		}
+		lines := strings.Split(idat, "\n")
+		ivalues = make([]int64, len(lines))
+		for i, v := range lines {
+			v = strings.TrimSpace(v)
+			ivalues[i], err = strconv.ParseInt(v, 10, 64)
+			if err != nil {
+				i18n.Printf(I18N_INPUT_ERR_TEMPLATE, input, i+1, v)
+				os.Exit(1)
+			}
+		}
+	}
+	prog, err := compile(sdat)
 	if err != nil {
 		return []WriteResult{}, err
 	}
-	return execute(*prog)
+	return execute(*prog, ivalues)
 }
 
 func init() {
@@ -710,6 +784,9 @@ func init() {
 	message.SetString(language.BrazilianPortuguese, I18N_ERR_WRITE_EXPECT_VALUE, "espera um valor, mas recebeu")
 	message.SetString(language.BrazilianPortuguese, I18N_ERR_WRITE_ONLY_ONE_PARAM, "recebe apenas um valor como parametro, mas recebeu")
 
+	message.SetString(language.BrazilianPortuguese, I18N_ERR_READ_EXPECT_VALUE, "espera um valor, mas recebeu")
+	message.SetString(language.BrazilianPortuguese, I18N_ERR_READ_INVALID_WORD, "esperando uma palavra válida, mas recebeu")
+
 	message.SetString(language.BrazilianPortuguese, I18N_COMPILE_ERR_TEMPLATE, "[Erro de compilação : linha %d] %v.")
 
 	message.SetString(language.BrazilianPortuguese, I18N_COMPILE_ERR_INST_NOT_FOUND, "instrução não identificada")
@@ -718,6 +795,8 @@ func init() {
 	message.SetString(language.BrazilianPortuguese, I18N_EXEC_ERR_INVALID_MEMORY_ACCESS, "acesso de memória inválido")
 
 	message.SetString(language.BrazilianPortuguese, I18N_EXEC_ERR_TEMPLATE, "[Erro de execução : linha %d] %v.")
+
+	message.SetString(language.BrazilianPortuguese, I18N_INPUT_ERR_TEMPLATE, "No arquivo de entrada '%s' na linha %d não foi possivel converter '%s' em um número\n")
 
 	i18n = message.NewPrinter(language.BrazilianPortuguese)
 }
@@ -741,7 +820,11 @@ func main() {
 		os.Exit(1)
 		break
 	case USE_RUN:
-		res, err := Run(os.Args[1])
+		input := ""
+		if len(os.Args) > 2 {
+			input = os.Args[2]
+		}
+		res, err := Run(os.Args[1], input)
 		for _, r := range res {
 			print(r)
 		}

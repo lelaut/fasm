@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path"
@@ -18,8 +19,13 @@ func TestExamples(t *testing.T) {
 
 	for _, item := range items {
 		if strings.HasSuffix(item.Name(), ".asm") {
+			input := path.Join(EXAMPLE_FILENAME, item.Name()+".in")
+			if _, err := os.Stat(input); errors.Is(err, os.ErrNotExist) {
+				input = ""
+			}
+
 			fmt.Println("Running", item.Name())
-			res, err := Run(path.Join(EXAMPLE_FILENAME, item.Name()))
+			res, err := Run(path.Join(EXAMPLE_FILENAME, item.Name()), input)
 			if err != nil {
 				t.Error(err)
 			}
