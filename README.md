@@ -80,15 +80,7 @@ main:
   to some_label if $0 > 1 && $0 < 12
 ```
 
-### 4. Halt
-
-Halt the program.
-
-```
-halt
-```
-
-### 5. Print
+### 5. Write
 
 Print a value. Suppose that your memory looks like this `[1,2,3,4,5]`.
 
@@ -96,4 +88,17 @@ Print a value. Suppose that your memory looks like this `[1,2,3,4,5]`.
 print 1 # Will print `$ 1`
 print $1 # Will print `$ [ 1 ] 2`
 print &1 # Will print `$ [ 1 -> 2 ] 3`
+```
+
+### 6. Read
+
+Read a value from the input file. Will jump to the label provided if unable to read(optional).
+
+```
+read $0
+read $0 end
+read $0 end
+
+end:
+  write $0
 ```
