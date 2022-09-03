@@ -34,8 +34,10 @@ const (
 	I18N_ERR_WRITE_EXPECT_VALUE   = "expecting a value, but received"
 	I18N_ERR_WRITE_ONLY_ONE_PARAM = "expecting only one value as a parameter, but received"
 
-	I18N_ERR_READ_EXPECT_VALUE = "expecting a value, but received"
-	I18N_ERR_READ_INVALID_WORD = "expecting valid word, but received"
+	I18N_ERR_READ_EXPECT_VALUE  = "expecting a value, but received"
+	I18N_ERR_READ_INVALID_WORD  = "expecting valid word, but received"
+	I18N_ERR_READ_NOTHING       = "trying to read when there is no more input"
+	I18N_ERR_READ_NO_ELSE_LABEL = "no else label"
 
 	I18N_COMPILE_ERR_TEMPLATE = "[Compilation error: line %d] %v."
 
@@ -723,6 +725,9 @@ func execute(prog Program, input []int64) ([]WriteResult, error) {
 				rc += 1
 				pc += 1
 			} else {
+				if in.elseLabel == "" {
+					return results, executionError(prog.instructions[pc].line, formatError("[read]", I18N_ERR_READ_NOTHING, I18N_ERR_READ_NO_ELSE_LABEL))
+				}
 				pc = prog.labels[in.elseLabel]
 			}
 			break
@@ -786,6 +791,8 @@ func init() {
 
 	message.SetString(language.BrazilianPortuguese, I18N_ERR_READ_EXPECT_VALUE, "espera um valor, mas recebeu")
 	message.SetString(language.BrazilianPortuguese, I18N_ERR_READ_INVALID_WORD, "esperando uma palavra válida, mas recebeu")
+	message.SetString(language.BrazilianPortuguese, I18N_ERR_READ_NOTHING, "tentando ler um arquivo que já acabou")
+	message.SetString(language.BrazilianPortuguese, I18N_ERR_READ_NO_ELSE_LABEL, "sem uma label de saída")
 
 	message.SetString(language.BrazilianPortuguese, I18N_COMPILE_ERR_TEMPLATE, "[Erro de compilação : linha %d] %v.")
 
